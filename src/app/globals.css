@@ -1,0 +1,132 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 20 20% 15%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 20 20% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 20 20% 15%;
+
+    --primary: 268 99% 47.5%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 30 15% 92%;
+    --secondary-foreground: 20 20% 20%;
+
+    --muted: 30 10% 94%;
+    --muted-foreground: 20 10% 45%;
+
+    --accent: 268 70% 96%;
+    --accent-foreground: 268 85% 35%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 30 15% 88%;
+    --input: 30 15% 88%;
+    --ring: 268 99% 47.5%;
+
+    --radius: 0.75rem;
+
+    --success: 142 60% 40%;
+    --success-foreground: 0 0% 100%;
+
+    --sidebar-background: 30 20% 96%;
+    --sidebar-foreground: 20 15% 30%;
+    --sidebar-primary: 268 99% 47.5%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 268 70% 96%;
+    --sidebar-accent-foreground: 268 85% 35%;
+    --sidebar-border: 30 15% 88%;
+    --sidebar-ring: 268 99% 47.5%;
+  }
+
+  .dark {
+    --background: 20 15% 8%;
+    --foreground: 30 15% 92%;
+    --card: 20 15% 11%;
+    --card-foreground: 30 15% 92%;
+    --popover: 20 15% 11%;
+    --popover-foreground: 30 15% 92%;
+    --primary: 268 99% 47.5%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 20 12% 18%;
+    --secondary-foreground: 30 15% 90%;
+    --muted: 20 12% 18%;
+    --muted-foreground: 30 10% 55%;
+    --accent: 268 45% 20%;
+    --accent-foreground: 268 70% 85%;
+    --destructive: 0 62% 30%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 20 12% 20%;
+    --input: 20 12% 20%;
+    --ring: 268 99% 47.5%;
+    --sidebar-background: 20 15% 10%;
+    --sidebar-foreground: 30 15% 85%;
+    --sidebar-primary: 268 99% 47.5%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 268 45% 20%;
+    --sidebar-accent-foreground: 268 70% 85%;
+    --sidebar-border: 20 12% 20%;
+    --sidebar-ring: 268 99% 47.5%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  /* На мобильных горизонтальную прокрутку документа держит именно <html>, поэтому
+     ограничиваем ширину на нём (правки #32/#49). overflow-x: hidden на корневом
+     скролл-контейнере безопасен для sticky-шапки (она липнет к этому же скроллеру).
+     Внутренние ленты (промо, чипы дат, слоты) скроллятся в своих overflow-x-auto. */
+  html {
+    overflow-x: hidden;
+  }
+  body {
+    @apply bg-background text-foreground;
+    overflow-x: clip;
+    max-width: 100%;
+  }
+  /* Базовая адаптивность медиа: изображения/видео не выходят за ширину контейнера
+     (правка #32 — «фото не влезают» на мобильных). max-width безопаснее глобального
+     overflow-x:hidden, т.к. не маскирует, а устраняет частый источник переполнения. */
+  img,
+  video {
+    max-width: 100%;
+  }
+  /* Длинные ссылки/слова без пробелов не растягивают верстку за экран (правка #49). */
+  p,
+  span,
+  a,
+  h1, h2, h3, h4 {
+    overflow-wrap: break-word;
+  }
+}
+
+@layer utilities {
+  /* Горизонтальные ленты (категории, даты, слоты) скроллятся без видимой полосы. */
+  .scrollbar-none {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Keep Leaflet map panes/controls below modals & overlays.
+   Equal z-index preserves Leaflet's internal DOM-order stacking
+   (tiles < markers < tooltips < popups < controls). */
+.leaflet-pane,
+.leaflet-top,
+.leaflet-bottom,
+.leaflet-control {
+  z-index: 1 !important;
+}

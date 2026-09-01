@@ -1,0 +1,1 @@
+GRANT INSERT ON public.bookings TO anon, authenticated;

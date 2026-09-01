@@ -1,0 +1,462 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums (TZ design, used in future app models) ───────────────────────────
+
+enum MerchantStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+}
+
+enum ContentStatus {
+  DRAFT
+  PENDING_REVIEW
+  PUBLISHED
+  REJECTED
+  NEEDS_REVISION
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  REJECTED
+  AUTO_REJECTED
+  SLOT_TAKEN
+  CANCELLED
+  NO_SHOW
+  COMPLETED
+}
+
+enum BookingSource {
+  ONLINE
+  MANUAL
+}
+
+enum AllocationMode {
+  SPECIFIC
+  POOL
+}
+
+enum ModerationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  NEEDS_REVISION
+}
+
+enum ReviewStatus {
+  PUBLISHED
+  HIDDEN
+}
+
+enum NotificationChannel {
+  EMAIL
+  TELEGRAM
+}
+
+enum WaitlistStatus {
+  ACTIVE
+  NOTIFIED
+  EXPIRED
+  CONVERTED
+}
+
+enum DiscountType {
+  OFF_PEAK
+  FIRST_VISIT
+  TIME_LIMITED
+}
+
+// ─── Better Auth core models ─────────────────────────────────────────────────
+
+model User {
+  id              String   @id
+  name            String
+  email           String   @unique
+  emailVerified   Boolean  @default(false)
+  image           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // App-specific fields (stored via Better Auth additionalFields)
+  phone           String?
+  role            String   @default("client")
+  locale          String   @default("ru")
+  noShowCount     Int      @default(0)
+  isPhoneVerified Boolean  @default(false)
+  link            String?
+
+  // Гость, вошедший без регистрации (плагин anonymous). После привязки
+  // настоящего аккаунта запись удаляется, а данные переносятся на новую.
+  isAnonymous     Boolean  @default(false)
+
+  // Better Auth relations
+  sessions Session[]
+  accounts Account[]
+
+  // App relations
+  merchant      Merchant?
+  staffOf       MerchantStaff[]
+  bookings      Booking[]
+  reviews       Review[]
+  favorites     Favorite[]
+  waitlist      WaitlistEntry[]
+  telegram      TelegramLink?
+  referralsMade Referral[]      @relation("referrer")
+  notifications Notification[]
+  pushSubscriptions PushSubscription[]
+  fcmTokens         FcmToken[]
+}
+
+// Web-push подписки устройств пользователя (правка #44).
+// Историческая таблица от VAPID-пушей: отправка переехала на FCM (модель
+// FcmToken), записи оставлены, чтобы не терять данные при откате.
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// Токены устройств для Firebase Cloud Messaging.
+model FcmToken {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime
+  updatedAt DateTime
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime
+  updatedAt             DateTime
+}
+
+model Verification {
+  id         String    @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime?
+  updatedAt  DateTime?
+}
+
+// ─── Business models ──────────────────────────────────────────────────────────
+
+model Merchant {
+  id            String         @id @default(cuid())
+  ownerUserId   String         @unique
+  owner         User           @relation(fields: [ownerUserId], references: [id])
+  status        MerchantStatus @default(PENDING)
+  dealAmount    Int?
+  dealCurrency  String?        @default("KZT")
+  dealPlan      String?
+  activatedAt   DateTime?
+  expiresAt     DateTime?
+  featuredUntil DateTime?
+  createdAt     DateTime       @default(now())
+
+  venues Venue[]
+  staff  MerchantStaff[]
+}
+
+model MerchantStaff {
+  id          String   @id @default(cuid())
+  merchantId  String
+  userId      String
+  permissions String[]
+  merchant    Merchant @relation(fields: [merchantId], references: [id])
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@unique([merchantId, userId])
+}
+
+model Category {
+  id     String  @id @default(cuid())
+  slug   String  @unique
+  nameRu String
+  nameKk String
+  nameEn String
+  venues Venue[]
+  resources Resource[]
+}
+
+model Venue {
+  id            String        @id @default(cuid())
+  merchantId    String
+  merchant      Merchant      @relation(fields: [merchantId], references: [id])
+  categoryId    String
+  category      Category      @relation(fields: [categoryId], references: [id])
+  name          String
+  description   String
+  address       String
+  lat           Float
+  lng           Float
+  phone         String?
+  instagram     String?
+  website       String?
+  twogis        String?
+  tiktok        String?
+  photos        String[]
+  contentStatus ContentStatus @default(DRAFT)
+  listingOnly   Boolean       @default(false)
+  bookingHorizonDays      Int  @default(14) // глубина брони в днях (правка #6)
+  cancellationCutoffHours Int  @default(0)  // запрет отмены/переноса за N ч до сеанса (правка #14)
+  // Настройки автоприёма/автоотклонения заявок (правка #53)
+  autoRejectMinutesBeforeStart Int  @default(30) // за сколько минут до начала снимать неподтверждённую заявку
+  minLeadTimeMinutes           Int  @default(0)  // не принимать заявки позже чем за N минут до начала
+  autoRejectNoShowThreshold    Int?              // автоотклонять клиентов с N+ неявками (null = выкл)
+  autoConfirmUnanswered        Boolean @default(false) // неотвеченные к дедлайну — подтверждать, а не отклонять
+  createdAt     DateTime      @default(now())
+
+  resources Resource[]
+  hours     VenueHours[]
+  reviews   Review[]
+  favorites Favorite[]
+  discounts Discount[]
+  questions VenueQuestion[]
+
+  @@index([categoryId])
+  @@index([lat, lng])
+}
+
+model VenueQuestion {
+  id         String  @id @default(cuid())
+  venueId    String
+  venue      Venue   @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  text       String
+  fieldType  String  @default("text")             // "text" | "select"
+  options    String[]                              // варианты для type=select
+  isRequired Boolean @default(false)
+  sortOrder  Int     @default(0)
+}
+
+model Resource {
+  id                 String         @id @default(cuid())
+  venueId            String
+  venue              Venue          @relation(fields: [venueId], references: [id])
+  name               String
+  capacity           Int
+  quantity           Int            @default(1)
+  allocationMode     AllocationMode @default(SPECIFIC)
+  pricePerHour       Int?
+  price              Int?
+  bookingDeposit     Int?           // депозит/предоплата за бронь; собирает заведение (правка #51)
+  defaultDurationMin Int            @default(120)
+  photos             String[]
+  isBlocked          Boolean        @default(false)
+  categoryId         String?
+  category           Category?      @relation(fields: [categoryId], references: [id])
+
+  bookings  Booking[]
+  blackouts Blackout[]
+  waitlist  WaitlistEntry[]
+}
+
+model VenueHours {
+  id        String @id @default(cuid())
+  venueId   String
+  venue     Venue  @relation(fields: [venueId], references: [id])
+  dayOfWeek Int
+  openTime  String
+  closeTime String
+}
+
+model Blackout {
+  id         String   @id @default(cuid())
+  resourceId String
+  resource   Resource @relation(fields: [resourceId], references: [id])
+  startAt    DateTime
+  endAt      DateTime
+  reason     String?
+}
+
+model Discount {
+  id         String       @id @default(cuid())
+  venueId    String
+  venue      Venue        @relation(fields: [venueId], references: [id])
+  type       DiscountType
+  percentage Int
+  dayOfWeek  Int?
+  startTime  String?
+  endTime    String?
+  validFrom  DateTime?
+  validTo    DateTime?
+}
+
+model Booking {
+  id            String        @id @default(cuid())
+  resourceId    String
+  resource      Resource      @relation(fields: [resourceId], references: [id])
+  clientUserId  String?
+  client        User?         @relation(fields: [clientUserId], references: [id])
+  guestName     String?
+  guestPhone    String?
+  startAt       DateTime
+  endAt         DateTime
+  guests        Int
+  comment       String?
+  customAnswers Json?
+  status        BookingStatus @default(PENDING)
+  source        BookingSource @default(ONLINE)
+  checkInCode   String?       @unique
+  autoRejectAt  DateTime
+  confirmedAt   DateTime?
+  cancelledAt   DateTime?
+  createdAt     DateTime      @default(now())
+
+  review Review?
+
+  @@index([resourceId, startAt])
+  @@index([clientUserId, status])
+}
+
+model Review {
+  id               String       @id @default(cuid())
+  venueId          String
+  venue            Venue        @relation(fields: [venueId], references: [id])
+  bookingId        String?      @unique
+  booking          Booking?     @relation(fields: [bookingId], references: [id])
+  clientUserId     String
+  client           User         @relation(fields: [clientUserId], references: [id])
+  rating           Int
+  text             String?
+  photos           String[]
+  merchantResponse String?
+  status           ReviewStatus @default(PUBLISHED)
+  createdAt        DateTime     @default(now())
+
+  @@index([venueId])
+}
+
+model Favorite {
+  id           String @id @default(cuid())
+  clientUserId String
+  venueId      String
+  client       User   @relation(fields: [clientUserId], references: [id])
+  venue        Venue  @relation(fields: [venueId], references: [id])
+
+  @@unique([clientUserId, venueId])
+}
+
+model WaitlistEntry {
+  id           String         @id @default(cuid())
+  resourceId   String
+  resource     Resource       @relation(fields: [resourceId], references: [id])
+  clientUserId String
+  client       User           @relation(fields: [clientUserId], references: [id])
+  desiredStart DateTime
+  status       WaitlistStatus @default(ACTIVE)
+  createdAt    DateTime       @default(now())
+}
+
+model Referral {
+  id            String   @id @default(cuid())
+  referrerId    String
+  referrer      User     @relation("referrer", fields: [referrerId], references: [id])
+  refereeUserId String?
+  code          String   @unique
+  rewardGranted Boolean  @default(false)
+  createdAt     DateTime @default(now())
+}
+
+model ModerationRequest {
+  id           String           @id @default(cuid())
+  entityType   String
+  entityId     String
+  proposedData Json
+  status       ModerationStatus @default(PENDING)
+  submittedBy  String
+  reviewedBy   String?
+  reviewedAt   DateTime?
+  note         String?
+  createdAt    DateTime         @default(now())
+}
+
+model TelegramLink {
+  id       String   @id @default(cuid())
+  userId   String   @unique
+  chatId   String
+  user     User     @relation(fields: [userId], references: [id])
+  linkedAt DateTime @default(now())
+}
+
+model Notification {
+  id        String              @id @default(cuid())
+  userId    String
+  user      User                @relation(fields: [userId], references: [id])
+  type      String
+  channel   NotificationChannel
+  payload   Json
+  sendAt    DateTime?
+  sentAt    DateTime?
+  readAt    DateTime?           // серверная отметка «прочитано» (правка #31)
+  deliveryStatus String  @default("PENDING") // PENDING | SENT | FAILED (правка #41)
+  attempts       Int     @default(0)         // число попыток доставки (правка #41)
+  lastError      String?                       // текст последней ошибки доставки (правка #41)
+  createdAt DateTime            @default(now())
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  actorUserId String?
+  action      String
+  entityType  String
+  entityId    String
+  metadata    Json?
+  createdAt   DateTime @default(now())
+}
+
+// Промо-баннеры на главной, управляются из админки (можно несколько)
+model PromoBanner {
+  id        String   @id @default(cuid())
+  title     String
+  subtitle  String?
+  ctaLabel  String?          // текст кнопки, напр. «Смотреть»
+  ctaUrl    String?          // куда ведёт баннер, напр. /venues?category=bath
+  imageUrl  String?          // необязательная картинка/иконка
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([isActive, sortOrder])
+}
